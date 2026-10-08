@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Satsim | Interactive Satellite Constellation & ISL Visualizer</title>
   <link rel="stylesheet" href="style.css">
-  <!-- Import Three.js via CDN -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.min.js"></script>
+  <!-- Fixed Three.js CDN link -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
   <div id="canvas-container"></div>
@@ -14,10 +14,9 @@
   <div id="ui-panel">
     <h2>Satsim Visualizer</h2>
     <p>3D Walker Constellation &amp; Real-time ISL Routing</p>
-    <div id="status">Loading WebAssembly module...</div>
+    <div id="status">Initializing 3D Globe & WASM...</div>
   </div>
 
-  <!-- Load WebAssembly glue code & frontend script -->
   <script src="wasm/satsim.js"></script>
   <script src="main.js"></script>
 </body>

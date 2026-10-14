@@ -12,19 +12,14 @@ const config = {
 let scene, camera, renderer, controls;
 let satGroup = null;
 let islGroup = null;
+let cloudMesh = null;
 let satellites = [];
 const earthRadius = 5;
 
-// 1. Initialize 3D Three.js canvas first
 initThreeJS();
-
-// 2. Setup UI Control Bindings
 setupUI();
-
-// 3. Build satellites and start rendering
 rebuildConstellation();
 
-// 4. Try loading WASM module
 if (typeof SatsimModule === 'function') {
   SatsimModule({
     locateFile: (path) => `wasm/${path}`
@@ -52,6 +47,7 @@ function initThreeJS() {
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
   container.appendChild(renderer.domElement);
 
   if (typeof THREE.OrbitControls !== 'undefined') {
@@ -60,11 +56,61 @@ function initThreeJS() {
     controls.dampingFactor = 0.05;
   }
 
-  // Earth Globe
-  const geometry = new THREE.SphereGeometry(earthRadius, 48, 48);
-  const material = new THREE.MeshBasicMaterial({ color: 0x1d4ed8, wireframe: true, transparent: true, opacity: 0.5 });
-  const globe = new THREE.Mesh(geometry, material);
-  scene.add(globe);
+  const ambientLight = new THREE.AmbientLight(0x333333, 1.2);
+  scene.add(ambientLight);
+
+  const sunLight = new THREE.DirectionalLight(0xffffff, 2.0);
+  sunLight.position.set(15, 10, 15);
+  scene.add(sunLight);
+
+  const textureLoader = new THREE.TextureLoader();
+
+  const earthGeo = new THREE.SphereGeometry(earthRadius, 64, 64);
+  const earthMat = new THREE.MeshPhongMaterial({
+    map: textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_atmos_2048.jpg'),
+    specularMap: textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_specular_2048.jpg'),
+    normalMap: textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_normal_2048.jpg'),
+    normalScale: new THREE.Vector2(0.85, 0.85),
+    specular: new THREE.Color(0x333333),
+    shininess: 15
+  });
+
+  const earthMesh = new THREE.Mesh(earthGeo, earthMat);
+  scene.add(earthMesh);
+
+  const cloudGeo = new THREE.SphereGeometry(earthRadius + 0.04, 64, 64);
+  const cloudMat = new THREE.MeshPhongMaterial({
+    map: textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_clouds_2048.png'),
+    transparent: true,
+    opacity: 0.45,
+    blending: THREE.AdditiveBlending
+  });
+  cloudMesh = new THREE.Mesh(cloudGeo, cloudMat);
+  scene.add(cloudMesh);
+
+  const atmosphereGeo = new THREE.SphereGeometry(earthRadius + 0.25, 64, 64);
+  const atmosphereMat = new THREE.ShaderMaterial({
+    vertexShader: `
+      varying vec3 vNormal;
+      void main() {
+        vNormal = normalize(normalMatrix * normal);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      varying vec3 vNormal;
+      void main() {
+        float intensity = pow(0.65 - dot(vNormal, vec3(0, 0, 1.0)), 2.0);
+        gl_FragColor = vec4(0.2, 0.6, 1.0, 1.0) * intensity;
+      }
+    `,
+    blending: THREE.AdditiveBlending,
+    side: THREE.BackSide,
+    transparent: true
+  });
+
+  const atmosphereMesh = new THREE.Mesh(atmosphereGeo, atmosphereMat);
+  scene.add(atmosphereMesh);
 
   satGroup = new THREE.Group();
   islGroup = new THREE.Group();
@@ -82,8 +128,10 @@ function initThreeJS() {
   function animate() {
     requestAnimationFrame(animate);
     const elapsedTime = clock.getElapsedTime();
-    globe.rotation.y = elapsedTime * 0.03 * config.simSpeed;
-    
+
+    earthMesh.rotation.y = elapsedTime * 0.02 * config.simSpeed;
+    if (cloudMesh) cloudMesh.rotation.y = elapsedTime * 0.025 * config.simSpeed;
+
     if (controls) controls.update();
     updateSatellitePositions(elapsedTime);
     renderer.render(scene, camera);
@@ -132,7 +180,7 @@ function rebuildConstellation() {
   const incRad = (config.inclinationDeg * Math.PI) / 180;
   const orbitRadius = earthRadius + (config.altitudeKm / 6371) * earthRadius * 1.5;
 
-  const satGeo = new THREE.SphereGeometry(0.2, 12, 12);
+  const satGeo = new THREE.SphereGeometry(0.18, 12, 12);
   const satMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
 
   for (let p = 0; p < numPlanes; p++) {
@@ -164,7 +212,7 @@ function updateSatellitePositions(time) {
 
   satellites.forEach((sat) => {
     const currentAnomaly = sat.anomaly + time * 0.15 * config.simSpeed;
-    
+
     const xOrb = sat.radius * Math.cos(currentAnomaly);
     const yOrb = sat.radius * Math.sin(currentAnomaly);
 
@@ -178,7 +226,7 @@ function updateSatellitePositions(time) {
 
   if (config.showISLs && islGroup) {
     islGroup.clear();
-    const lineMat = new THREE.LineBasicMaterial({ color: 0x0284c7, transparent: true, opacity: 0.4 });
+    const lineMat = new THREE.LineBasicMaterial({ color: 0x0284c7, transparent: true, opacity: 0.45 });
     const linePositions = [];
 
     const numPlanes = config.planes;
@@ -214,10 +262,10 @@ function updateSatellitePositions(time) {
 function updateMetrics() {
   const totalSats = satellites.length;
   const totalISLs = config.showISLs ? totalSats * 2 : 0;
-  
+
   const totalEl = document.getElementById('metric-total-sats');
   const islsEl = document.getElementById('metric-active-isls');
-  
+
   if (totalEl) totalEl.innerText = totalSats;
   if (islsEl) islsEl.innerText = totalISLs;
 }

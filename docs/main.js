@@ -9,37 +9,87 @@ const config = {
   simSpeed: 1.0
 };
 
-let wasmModule = null;
+let scene, camera, renderer, controls;
 let satGroup = null;
 let islGroup = null;
 let satellites = [];
-let earthRadius = 5; // Three.js units representing ~6371 km Earth radius
+const earthRadius = 5;
 
-// Boot WASM module safely
+// 1. Initialize 3D Three.js canvas first
+initThreeJS();
+
+// 2. Setup UI Control Bindings
+setupUI();
+
+// 3. Build satellites and start rendering
+rebuildConstellation();
+
+// 4. Try loading WASM module
 if (typeof SatsimModule === 'function') {
   SatsimModule({
     locateFile: (path) => `wasm/${path}`
   }).then((Module) => {
-    wasmModule = Module;
     const badge = document.getElementById('status-badge');
     if (badge) {
       badge.innerText = 'WASM Engine Active';
       badge.classList.add('active');
     }
-    console.log('Satsim WASM Module initialized:', Module);
-    rebuildConstellation();
   }).catch((err) => {
-    console.error('WASM initialization error:', err);
+    console.warn('WASM fallback mode:', err);
     const badge = document.getElementById('status-badge');
-    if (badge) badge.innerText = 'JS Math Engine (Fallback)';
-    rebuildConstellation();
+    if (badge) badge.innerText = 'JS Physics Active';
   });
-} else {
-  rebuildConstellation();
 }
 
-setupUI();
-const { scene, camera, renderer } = initThreeJS();
+function initThreeJS() {
+  const container = document.getElementById('canvas-container');
+  if (!container) return;
+
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+  camera.position.set(0, 10, 20);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(window.devicePixelRatio);
+  container.appendChild(renderer.domElement);
+
+  if (typeof THREE.OrbitControls !== 'undefined') {
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+  }
+
+  // Earth Globe
+  const geometry = new THREE.SphereGeometry(earthRadius, 48, 48);
+  const material = new THREE.MeshBasicMaterial({ color: 0x1d4ed8, wireframe: true, transparent: true, opacity: 0.5 });
+  const globe = new THREE.Mesh(geometry, material);
+  scene.add(globe);
+
+  satGroup = new THREE.Group();
+  islGroup = new THREE.Group();
+  scene.add(satGroup);
+  scene.add(islGroup);
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  let clock = new THREE.Clock();
+
+  function animate() {
+    requestAnimationFrame(animate);
+    const elapsedTime = clock.getElapsedTime();
+    globe.rotation.y = elapsedTime * 0.03 * config.simSpeed;
+    
+    if (controls) controls.update();
+    updateSatellitePositions(elapsedTime);
+    renderer.render(scene, camera);
+  }
+  animate();
+}
 
 function setupUI() {
   bindSlider('planes-slider', 'planes-val', (v) => { config.planes = parseInt(v); rebuildConstellation(); });
@@ -47,13 +97,6 @@ function setupUI() {
   bindSlider('altitude-slider', 'altitude-val', (v) => { config.altitudeKm = parseInt(v); rebuildConstellation(); });
   bindSlider('inclination-slider', 'inclination-val', (v) => { config.inclinationDeg = parseInt(v); rebuildConstellation(); });
   bindSlider('speed-slider', 'speed-val', (v) => { config.simSpeed = parseFloat(v); }, (v) => `${parseFloat(v).toFixed(1)}x`);
-
-  const algoSelect = document.getElementById('algo-select');
-  if (algoSelect) {
-    algoSelect.addEventListener('change', (e) => {
-      config.algo = e.target.value;
-    });
-  }
 
   const toggleISLs = document.getElementById('toggle-isls');
   if (toggleISLs) {
@@ -77,17 +120,28 @@ function bindSlider(id, valId, onChange, formatFn = (v) => v) {
 }
 
 function rebuildConstellation() {
+  if (!scene || !satGroup) return;
+
+  satGroup.clear();
+  if (islGroup) islGroup.clear();
   satellites = [];
+
   const numPlanes = config.planes;
   const numSatsPerPlane = config.satsPerPlane;
   const totalSats = numPlanes * numSatsPerPlane;
   const incRad = (config.inclinationDeg * Math.PI) / 180;
-  const orbitRadius = earthRadius + (config.altitudeKm / 6371) * earthRadius;
+  const orbitRadius = earthRadius + (config.altitudeKm / 6371) * earthRadius * 1.5;
+
+  const satGeo = new THREE.SphereGeometry(0.2, 12, 12);
+  const satMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
 
   for (let p = 0; p < numPlanes; p++) {
     const raan = (2 * Math.PI * p) / numPlanes;
     for (let s = 0; s < numSatsPerPlane; s++) {
       const meanAnomaly = (2 * Math.PI * s) / numSatsPerPlane + (p * Math.PI) / totalSats;
+      const mesh = new THREE.Mesh(satGeo, satMat);
+      satGroup.add(mesh);
+
       satellites.push({
         plane: p,
         index: s,
@@ -95,43 +149,22 @@ function rebuildConstellation() {
         inc: incRad,
         anomaly: meanAnomaly,
         radius: orbitRadius,
-        pos: new THREE.Vector3()
+        pos: new THREE.Vector3(),
+        mesh: mesh
       });
     }
   }
 
-  if (satGroup) scene.remove(satGroup);
-  if (islGroup) scene.remove(islGroup);
-
-  satGroup = new THREE.Group();
-  islGroup = new THREE.Group();
-
-  const satGeo = new THREE.SphereGeometry(0.12, 12, 12);
-  const satMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
-
-  satellites.forEach((sat, i) => {
-    const mesh = new THREE.Mesh(satGeo, satMat);
-    sat.mesh = mesh;
-    satGroup.add(mesh);
-  });
-
-  scene.add(satGroup);
-  scene.add(islGroup);
-  islGroup.visible = config.showISLs;
-
-  updateSatellitePositions(0);
+  if (islGroup) islGroup.visible = config.showISLs;
   updateMetrics();
 }
 
 function updateSatellitePositions(time) {
   if (!satellites.length) return;
 
-  const numSats = satellites.length;
-
-  satellites.forEach((sat, idx) => {
-    const currentAnomaly = sat.anomaly + time * 0.2 * config.simSpeed;
+  satellites.forEach((sat) => {
+    const currentAnomaly = sat.anomaly + time * 0.15 * config.simSpeed;
     
-    // Orbital mechanics transformation: Keplerian elements -> Cartesian XYZ
     const xOrb = sat.radius * Math.cos(currentAnomaly);
     const yOrb = sat.radius * Math.sin(currentAnomaly);
 
@@ -140,13 +173,12 @@ function updateSatellitePositions(time) {
     const z = yOrb * Math.sin(sat.inc);
 
     sat.pos.set(x, z, y);
-    if (sat.mesh) sat.mesh.position.copy(sat.pos);
+    sat.mesh.position.copy(sat.pos);
   });
 
-  // Render Inter-Satellite Links (ISLs) between intra-plane and inter-plane neighbors
   if (config.showISLs && islGroup) {
     islGroup.clear();
-    const lineMat = new THREE.LineBasicMaterial({ color: 0x0284c7, transparent: true, opacity: 0.35 });
+    const lineMat = new THREE.LineBasicMaterial({ color: 0x0284c7, transparent: true, opacity: 0.4 });
     const linePositions = [];
 
     const numPlanes = config.planes;
@@ -158,14 +190,17 @@ function updateSatellitePositions(time) {
         const nextInPlaneIdx = p * satsPerPlane + ((s + 1) % satsPerPlane);
         const nextPlaneIdx = ((p + 1) % numPlanes) * satsPerPlane + s;
 
-        // Intra-plane link
-        const p1 = satellites[currentIdx].pos;
-        const p2 = satellites[nextInPlaneIdx].pos;
-        linePositions.push(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z);
+        if (satellites[currentIdx] && satellites[nextInPlaneIdx]) {
+          const p1 = satellites[currentIdx].pos;
+          const p2 = satellites[nextInPlaneIdx].pos;
+          linePositions.push(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z);
+        }
 
-        // Inter-plane link
-        const p3 = satellites[nextPlaneIdx].pos;
-        linePositions.push(p1.x, p1.y, p1.z, p3.x, p3.y, p3.z);
+        if (satellites[currentIdx] && satellites[nextPlaneIdx]) {
+          const p1 = satellites[currentIdx].pos;
+          const p3 = satellites[nextPlaneIdx].pos;
+          linePositions.push(p1.x, p1.y, p1.z, p3.x, p3.y, p3.z);
+        }
       }
     }
 
@@ -185,42 +220,4 @@ function updateMetrics() {
   
   if (totalEl) totalEl.innerText = totalSats;
   if (islsEl) islsEl.innerText = totalISLs;
-}
-
-function initThreeJS() {
-  const container = document.getElementById('canvas-container');
-  const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-  camera.position.set(0, 8, 18);
-
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(window.devicePixelRatio);
-  container.appendChild(renderer.domElement);
-
-  // 3D Globe
-  const geometry = new THREE.SphereGeometry(earthRadius, 48, 48);
-  const material = new THREE.MeshBasicMaterial({ color: 0x1d4ed8, wireframe: true, transparent: true, opacity: 0.6 });
-  const globe = new THREE.Mesh(geometry, material);
-  scene.add(globe);
-
-  window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  });
-
-  let clock = new THREE.Clock();
-
-  function animate() {
-    requestAnimationFrame(animate);
-    const elapsedTime = clock.getElapsedTime();
-    globe.rotation.y = elapsedTime * 0.05 * config.simSpeed;
-    
-    updateSatellitePositions(elapsedTime);
-    renderer.render(scene, camera);
-  }
-  animate();
-
-  return { scene, camera, renderer };
 }

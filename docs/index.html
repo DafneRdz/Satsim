@@ -20,6 +20,28 @@
     <div id="status-badge" class="badge">Initializing 3D Scene...</div>
 
     <div class="control-group">
+      <h3>Ground Station Routing</h3>
+      
+      <div class="control-item">
+        <label for="src-city">Source City</label>
+        <select id="src-city">
+          <option value="nyc" selected>New York (NYC)</option>
+          <option value="tokyo">Tokyo (TYO)</option>
+          <option value="london">London (LDN)</option>
+        </select>
+      </div>
+
+      <div class="control-item">
+        <label for="dst-city">Destination City</label>
+        <select id="dst-city">
+          <option value="london" selected>London (LDN)</option>
+          <option value="sydney">Sydney (SYD)</option>
+          <option value="tokyo">Tokyo (TYO)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="control-group">
       <h3>Constellation Parameters</h3>
       
       <div class="control-item">
@@ -44,16 +66,7 @@
     </div>
 
     <div class="control-group">
-      <h3>Routing &amp; Visualization</h3>
-
-      <div class="control-item">
-        <label for="algo-select">Routing Algorithm</label>
-        <select id="algo-select">
-          <option value="dijkstra">Dijkstra (Shortest Path)</option>
-          <option value="greedy">Greedy Geographic</option>
-          <option value="static">Static Grid</option>
-        </select>
-      </div>
+      <h3>Visualization Options</h3>
 
       <div class="control-item checkbox-item">
         <label for="toggle-isls">Show ISL Links</label>
@@ -70,7 +83,8 @@
       <h3>Network Telemetry</h3>
       <div class="metric-row"><span>Total Satellites:</span> <strong id="metric-total-sats">60</strong></div>
       <div class="metric-row"><span>Active ISLs:</span> <strong id="metric-active-isls">120</strong></div>
-      <div class="metric-row"><span>Path Latency:</span> <strong id="metric-latency">-- ms</strong></div>
+      <div class="metric-row"><span>Route Hops:</span> <strong id="metric-hops">--</strong></div>
+      <div class="metric-row"><span>Est. Latency:</span> <strong id="metric-latency">-- ms</strong></div>
     </div>
   </div>
 

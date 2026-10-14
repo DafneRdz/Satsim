@@ -6,12 +6,23 @@ const config = {
   inclinationDeg: 53,
   algo: 'dijkstra',
   showISLs: true,
-  simSpeed: 1.0
+  simSpeed: 1.0,
+  srcCity: 'nyc',
+  dstCity: 'london'
+};
+
+const CITIES = {
+  nyc: { name: 'New York', lat: 40.7128, lon: -74.0060 },
+  london: { name: 'London', lat: 51.5074, lon: -0.1278 },
+  tokyo: { name: 'Tokyo', lat: 35.6762, lon: 139.6503 },
+  sydney: { name: 'Sydney', lat: -33.8688, lon: 151.2093 }
 };
 
 let scene, camera, renderer, controls;
 let satGroup = null;
 let islGroup = null;
+let pathGroup = null;
+let groundStationGroup = null;
 let cloudMesh = null;
 let satellites = [];
 const earthRadius = 5;
@@ -114,8 +125,15 @@ function initThreeJS() {
 
   satGroup = new THREE.Group();
   islGroup = new THREE.Group();
+  pathGroup = new THREE.Group();
+  groundStationGroup = new THREE.Group();
+
   scene.add(satGroup);
   scene.add(islGroup);
+  scene.add(pathGroup);
+  scene.add(groundStationGroup);
+
+  renderGroundStations();
 
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -128,15 +146,40 @@ function initThreeJS() {
   function animate() {
     requestAnimationFrame(animate);
     const elapsedTime = clock.getElapsedTime();
-
+    
     earthMesh.rotation.y = elapsedTime * 0.02 * config.simSpeed;
     if (cloudMesh) cloudMesh.rotation.y = elapsedTime * 0.025 * config.simSpeed;
-
+    
     if (controls) controls.update();
     updateSatellitePositions(elapsedTime);
     renderer.render(scene, camera);
   }
   animate();
+}
+
+function latLonToVector3(lat, lon, radius) {
+  const phi = (90 - lat) * (Math.PI / 180);
+  const theta = (lon + 180) * (Math.PI / 180);
+  const x = -(radius * Math.sin(phi) * Math.cos(theta));
+  const z = radius * Math.sin(phi) * Math.sin(theta);
+  const y = radius * Math.cos(phi);
+  return new THREE.Vector3(x, y, z);
+}
+
+function renderGroundStations() {
+  if (!groundStationGroup) return;
+  groundStationGroup.clear();
+
+  const gsGeo = new THREE.SphereGeometry(0.12, 16, 16);
+  const gsMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
+
+  Object.keys(CITIES).forEach((key) => {
+    const city = CITIES[key];
+    const pos = latLonToVector3(city.lat, city.lon, earthRadius + 0.02);
+    const mesh = new THREE.Mesh(gsGeo, gsMat);
+    mesh.position.copy(pos);
+    groundStationGroup.add(mesh);
+  });
 }
 
 function setupUI() {
@@ -154,6 +197,12 @@ function setupUI() {
       updateMetrics();
     });
   }
+
+  const srcSelect = document.getElementById('src-city');
+  const dstSelect = document.getElementById('dst-city');
+
+  if (srcSelect) srcSelect.addEventListener('change', (e) => { config.srcCity = e.target.value; });
+  if (dstSelect) dstSelect.addEventListener('change', (e) => { config.dstCity = e.target.value; });
 }
 
 function bindSlider(id, valId, onChange, formatFn = (v) => v) {
@@ -212,7 +261,7 @@ function updateSatellitePositions(time) {
 
   satellites.forEach((sat) => {
     const currentAnomaly = sat.anomaly + time * 0.15 * config.simSpeed;
-
+    
     const xOrb = sat.radius * Math.cos(currentAnomaly);
     const yOrb = sat.radius * Math.sin(currentAnomaly);
 
@@ -226,7 +275,7 @@ function updateSatellitePositions(time) {
 
   if (config.showISLs && islGroup) {
     islGroup.clear();
-    const lineMat = new THREE.LineBasicMaterial({ color: 0x0284c7, transparent: true, opacity: 0.45 });
+    const lineMat = new THREE.LineBasicMaterial({ color: 0x0284c7, transparent: true, opacity: 0.35 });
     const linePositions = [];
 
     const numPlanes = config.planes;
@@ -257,15 +306,98 @@ function updateSatellitePositions(time) {
     const linesMesh = new THREE.LineSegments(lineGeo, lineMat);
     islGroup.add(linesMesh);
   }
+
+  updateRoutingPath();
+}
+
+function updateRoutingPath() {
+  if (!pathGroup || !satellites.length) return;
+  pathGroup.clear();
+
+  const srcCity = CITIES[config.srcCity];
+  const dstCity = CITIES[config.dstCity];
+  if (!srcCity || !dstCity) return;
+
+  const srcPos = latLonToVector3(srcCity.lat, srcCity.lon, earthRadius);
+  const dstPos = latLonToVector3(dstCity.lat, dstCity.lon, earthRadius);
+
+  let closestSrcSat = null;
+  let closestDstSat = null;
+  let minSrcDist = Infinity;
+  let minDstDist = Infinity;
+
+  satellites.forEach((sat) => {
+    const dSrc = sat.pos.distanceTo(srcPos);
+    const dDst = sat.pos.distanceTo(dstPos);
+
+    if (dSrc < minSrcDist) { minSrcDist = dSrc; closestSrcSat = sat; }
+    if (dDst < minDstDist) { minDstDist = dDst; closestDstSat = sat; }
+  });
+
+  if (!closestSrcSat || !closestDstSat) return;
+
+  const pathPositions = [
+    srcPos.x, srcPos.y, srcPos.z,
+    closestSrcSat.pos.x, closestSrcSat.pos.y, closestSrcSat.pos.z
+  ];
+
+  // Build intermediate multi-hop ISL trajectory
+  let curr = closestSrcSat;
+  let hops = 1;
+
+  while (curr !== closestDstSat && hops < 12) {
+    let nextSat = null;
+    let minD = Infinity;
+
+    satellites.forEach((candidate) => {
+      if (candidate === curr) return;
+      const distToCurr = candidate.pos.distanceTo(curr.pos);
+      if (distToCurr < 4.5) { // ISL connectivity threshold
+        const distToDst = candidate.pos.distanceTo(closestDstSat.pos);
+        if (distToDst < minD) {
+          minD = distToDst;
+          nextSat = candidate;
+        }
+      }
+    });
+
+    if (!nextSat || nextSat === curr) break;
+
+    pathPositions.push(
+      curr.pos.x, curr.pos.y, curr.pos.z,
+      nextSat.pos.x, nextSat.pos.y, nextSat.pos.z
+    );
+
+    curr = nextSat;
+    hops++;
+  }
+
+  pathPositions.push(
+    curr.pos.x, curr.pos.y, curr.pos.z,
+    dstPos.x, dstPos.y, dstPos.z
+  );
+
+  const pathMat = new THREE.LineBasicMaterial({ color: 0xef4444, linewidth: 3 });
+  const pathGeo = new THREE.BufferGeometry();
+  pathGeo.setAttribute('position', new THREE.Float32BufferAttribute(pathPositions, 3));
+  const pathMesh = new THREE.LineSegments(pathGeo, pathMat);
+  pathGroup.add(pathMesh);
+
+  // Update UI metrics
+  const hopsEl = document.getElementById('metric-hops');
+  const latencyEl = document.getElementById('metric-latency');
+
+  if (hopsEl) hopsEl.innerText = `${hops} hops`;
+  if (latencyEl) latencyEl.innerText = `${(hops * 4.2 + 12.5).toFixed(1)} ms`;
 }
 
 function updateMetrics() {
   const totalSats = satellites.length;
   const totalISLs = config.showISLs ? totalSats * 2 : 0;
-
+  
   const totalEl = document.getElementById('metric-total-sats');
   const islsEl = document.getElementById('metric-active-isls');
-
+  
   if (totalEl) totalEl.innerText = totalSats;
   if (islsEl) islsEl.innerText = totalISLs;
 }

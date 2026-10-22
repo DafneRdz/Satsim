@@ -19,6 +19,7 @@ const CITIES = {
 };
 
 let scene, camera, renderer, controls;
+let earthMesh = null;
 let satGroup = null;
 let islGroup = null;
 let pathGroup = null;
@@ -67,7 +68,7 @@ function initThreeJS() {
     controls.dampingFactor = 0.05;
   }
 
-  const ambientLight = new THREE.AmbientLight(0x333333, 1.2);
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
   scene.add(ambientLight);
 
   const sunLight = new THREE.DirectionalLight(0xffffff, 2.0);
@@ -86,7 +87,7 @@ function initThreeJS() {
     shininess: 15
   });
 
-  const earthMesh = new THREE.Mesh(earthGeo, earthMat);
+  earthMesh = new THREE.Mesh(earthGeo, earthMat);
   scene.add(earthMesh);
 
   const cloudGeo = new THREE.SphereGeometry(earthRadius + 0.04, 64, 64);
@@ -131,7 +132,7 @@ function initThreeJS() {
   scene.add(satGroup);
   scene.add(islGroup);
   scene.add(pathGroup);
-  scene.add(groundStationGroup);
+  earthMesh.add(groundStationGroup); // Attach ground stations directly to earthMesh
 
   renderGroundStations();
 
@@ -170,12 +171,12 @@ function renderGroundStations() {
   if (!groundStationGroup) return;
   groundStationGroup.clear();
 
-  const gsGeo = new THREE.SphereGeometry(0.12, 16, 16);
-  const gsMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
+  const gsGeo = new THREE.SphereGeometry(0.18, 16, 16);
+  const gsMat = new THREE.MeshBasicMaterial({ color: 0xff1100 });
 
   Object.keys(CITIES).forEach((key) => {
     const city = CITIES[key];
-    const pos = latLonToVector3(city.lat, city.lon, earthRadius + 0.02);
+    const pos = latLonToVector3(city.lat, city.lon, earthRadius + 0.05);
     const mesh = new THREE.Mesh(gsGeo, gsMat);
     mesh.position.copy(pos);
     groundStationGroup.add(mesh);
@@ -311,15 +312,19 @@ function updateSatellitePositions(time) {
 }
 
 function updateRoutingPath() {
-  if (!pathGroup || !satellites.length) return;
+  if (!pathGroup || !satellites.length || !earthMesh) return;
   pathGroup.clear();
 
   const srcCity = CITIES[config.srcCity];
   const dstCity = CITIES[config.dstCity];
   if (!srcCity || !dstCity) return;
 
-  const srcPos = latLonToVector3(srcCity.lat, srcCity.lon, earthRadius);
-  const dstPos = latLonToVector3(dstCity.lat, dstCity.lon, earthRadius);
+  // Transform ground station relative positions into world coordinates
+  const srcLocal = latLonToVector3(srcCity.lat, srcCity.lon, earthRadius + 0.05);
+  const dstLocal = latLonToVector3(dstCity.lat, dstCity.lon, earthRadius + 0.05);
+
+  const srcPos = srcLocal.clone().applyMatrix4(earthMesh.matrixWorld);
+  const dstPos = dstLocal.clone().applyMatrix4(earthMesh.matrixWorld);
 
   let closestSrcSat = null;
   let closestDstSat = null;
@@ -341,7 +346,6 @@ function updateRoutingPath() {
     closestSrcSat.pos.x, closestSrcSat.pos.y, closestSrcSat.pos.z
   ];
 
-  // Build intermediate multi-hop ISL trajectory
   let curr = closestSrcSat;
   let hops = 1;
 
@@ -352,7 +356,7 @@ function updateRoutingPath() {
     satellites.forEach((candidate) => {
       if (candidate === curr) return;
       const distToCurr = candidate.pos.distanceTo(curr.pos);
-      if (distToCurr < 4.5) { // ISL connectivity threshold
+      if (distToCurr < 6.0) {
         const distToDst = candidate.pos.distanceTo(closestDstSat.pos);
         if (distToDst < minD) {
           minD = distToDst;
@@ -377,13 +381,12 @@ function updateRoutingPath() {
     dstPos.x, dstPos.y, dstPos.z
   );
 
-  const pathMat = new THREE.LineBasicMaterial({ color: 0xef4444, linewidth: 3 });
+  const pathMat = new THREE.LineBasicMaterial({ color: 0xff0000, linewidth: 4 });
   const pathGeo = new THREE.BufferGeometry();
   pathGeo.setAttribute('position', new THREE.Float32BufferAttribute(pathPositions, 3));
   const pathMesh = new THREE.LineSegments(pathGeo, pathMat);
   pathGroup.add(pathMesh);
 
-  // Update UI metrics
   const hopsEl = document.getElementById('metric-hops');
   const latencyEl = document.getElementById('metric-latency');
 

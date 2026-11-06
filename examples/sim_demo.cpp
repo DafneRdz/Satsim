@@ -1,8 +1,4 @@
 // Phase 5 demo: run the discrete-event simulation under two link-capacity
-// scenarios to show the queuing model actually working - heavy traffic
-// over a constrained link should show up as higher average latency.
-//
-// Build & run (from repo root):
 //   cmake -B build && cmake --build build
 //   ./build/sim_demo
 

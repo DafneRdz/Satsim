@@ -1,7 +1,6 @@
-// Phase 2 demo: generate a full Walker-Delta satellite constellation and
+// Phase 2 demo: a full Walker-Delta satellite constellation and
 // a couple of ground stations, and print a snapshot of where everything is.
 //
-// Build & run (from repo root):
 //   cmake -B build && cmake --build build
 //   ./build/constellation_demo
 
@@ -47,7 +46,7 @@ int main() {
     std::cout << "\nSample of satellite positions at epoch (first satellite per plane):\n";
     std::cout << std::fixed << std::setprecision(1);
     for (const Satellite& sat : constellation.satellites()) {
-        if (sat.slotIndex != 0) continue; // just show one per plane to keep it readable
+        if (sat.slotIndex != 0) continue; // showing one per plane to keep it readable
         StateVector state = sat.propagator.stateAt(params.epoch);
         std::cout << "  " << sat.id
                   << "  plane=" << sat.planeIndex

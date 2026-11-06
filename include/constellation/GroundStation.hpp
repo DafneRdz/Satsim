@@ -7,9 +7,7 @@
 namespace satsim {
 
 // A fixed point on Earth's surface - a ground station that satellites
-// communicate with (uplink/downlink). Unlike a satellite, its position in
-// the Earth-Centered Earth-Fixed (ECEF) frame never changes; only its
-// position in the inertial (ECI) frame changes, as Earth rotates beneath it.
+// communicate with (uplink/downlink)
 class GroundStation {
 public:
     GroundStation(std::string name, double latitudeRad, double longitudeRad,

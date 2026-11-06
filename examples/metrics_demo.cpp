@@ -2,7 +2,6 @@
 // geographic routing, export per-packet results to CSV, and print a
 // summary comparison. The CSVs are the input to scripts/plot_results.py.
 //
-// Build & run (from repo root):
 //   cmake -B build && cmake --build build
 //   ./build/metrics_demo
 //   python3 scripts/plot_results.py
@@ -51,11 +50,8 @@ int main() {
         {"Sao Paulo",   deg2rad(-23.55), deg2rad(-46.63), 0.76},
     };
 
-    // Identical simulation parameters and random seed for both routers -
-    // this means both runs generate the exact same sequence of packets
-    // (same creation times, same source/destination pairs), so any
-    // difference in the results is attributable purely to the routing
-    // strategy, not to different traffic.
+    // Identical simulation parameters and random seed for both routers
+   
     SimulationParams simParams;
     simParams.durationSeconds = 300.0;
     simParams.topologyUpdateIntervalSeconds = 20.0;
